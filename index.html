@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>لعبة 3D - تحميل Y_Bot.glb</title>
+    <title>لعبة 3D - تحميل Y_Bot.glb عبر الرابط المطلق</title>
     <style>
         /* ستايل الشاشة والخلفية */
         body { margin: 0; overflow: hidden; background-color: #7ec0ee; } 
@@ -30,38 +30,37 @@
     </div>
 
     <script>
+        // ******************** متغير المسار الأساسي (غيّري هذا المسار ليتناسب مع مستودعك) ********************
+        // يجب أن يكون هذا الرابط هو رابط GitHub Pages الخاص بكِ
+        const BASE_PATH = 'https://bxzzccpm.github.io/-title-title-/';
+        
         // ******************** المتغيرات العالمية ********************
         let scene, camera, renderer, player, mixer; 
         let obstacles = []; 
         const MAP_SIZE = 100; 
         const NUM_OBSTACLES = 10; 
-        
-        // متغيرات الحركة والتحكم
         let joystick = { active: false, x: 0, y: 0, maxDistance: 75 };
         const playerSpeed = 0.05; 
         const cameraHeight = 2.0; 
         const cameraDistance = 4; 
-        let clock = new THREE.Clock(); // لإدارة وقت الرسوم المتحركة
-
-        // ******************** دالة التهيئة (Initialization) ********************
+        let clock = new THREE.Clock(); 
+        let action = {};
+        
+        // ******************** دالة التهيئة ********************
         function init() {
+            // ... (بقية كود التهيئة والإضاءة كما هو) ...
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x7ec0ee); // سماء زرقاء صافية
+            scene.background = new THREE.Color(0x7ec0ee); 
             
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            
-            // تفعيل الظلال
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
             document.body.appendChild(renderer.domElement);
             
-            // الإضاءة (شمس واقعية)
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
             scene.add(ambientLight);
-            
             const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); 
             directionalLight.position.set(10, 20, 10); 
             directionalLight.castShadow = true;
@@ -69,12 +68,11 @@
             directionalLight.shadow.mapSize.height = 1024; 
             scene.add(directionalLight);
 
-            // ******************** 1. الأرضية (تحميل خامة العشب) ********************
+            // ******************** 1. الأرضية (تحميل خامة العشب بالرابط المطلق) ********************
             const textureLoader = new THREE.TextureLoader();
             
-            // استخدام اسم الملف مباشرة (لأنه يعمل عبر الخادم المحلي 127.0.0.1)
             textureLoader.load(
-                'grass_texture.jpg', 
+                BASE_PATH + 'grass_texture.jpg', // استخدام المسار المطلق
                 (texture) => {
                     texture.wrapS = THREE.RepeatWrapping;
                     texture.wrapT = THREE.RepeatWrapping;
@@ -91,8 +89,8 @@
                 },
                 undefined,
                 (error) => {
-                    console.error('Error loading grass texture, using default green:', error);
-                    // في حال فشل التحميل، نستخدم لون أخضر بسيط
+                    console.error('فشل تحميل خامة العشب بالرابط المطلق، استخدام لون افتراضي:', error);
+                    // في حال فشل التحميل، نستخدم اللون الأخضر البسيط
                     const groundGeometry = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE);
                     const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x4B8E00, side: THREE.DoubleSide });
                     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -103,17 +101,16 @@
                 }
             );
 
-            // ******************** 2. تحميل اللاعب (Y_Bot.glb) ********************
+            // ******************** 2. تحميل اللاعب (Y_Bot.glb بالرابط المطلق) ********************
             const loader = new THREE.GLTFLoader();
             
-            // استخدام اسم الملف مباشرة
             loader.load(
-                'Y_Bot.glb', 
+                BASE_PATH + 'Y_Bot.glb', // استخدام المسار المطلق
                 (gltf) => {
                     player = gltf.scene; 
                     player.position.y = 0; 
+                    player.scale.set(1.5, 1.5, 1.5); 
                     
-                    // تفعيل الظلال لجميع أجزاء النموذج
                     player.traverse((child) => {
                         if (child.isMesh) {
                             child.castShadow = true;
@@ -122,22 +119,22 @@
                     });
 
                     scene.add(player); 
-                    player.userData.playerHalfSize = 0.35; // لتعديل التصادم
+                    player.userData.playerHalfSize = 0.5; 
                     
                     // إعداد الرسوم المتحركة
-                    if (gltf.animations && gltf.animations.length > 0) {
-                        mixer = new THREE.AnimationMixer(player);
-                        // تشغيل أول رسم متحرك (عادةً Idle أو T-pose)
-                        const defaultClip = gltf.animations[0]; 
-                        const defaultAction = mixer.clipAction(defaultClip);
-                        defaultAction.play();
-                        player.userData.defaultAction = defaultAction;
-                    }
+                    mixer = new THREE.AnimationMixer(player);
+                    gltf.animations.forEach((clip) => {
+                        if (clip.name === 'Armature|mixamo.com|Layer0') {
+                            action.idle = mixer.clipAction(clip);
+                            action.run = mixer.clipAction(clip);
+                            action.idle.play();
+                        }
+                    });
                 }, 
                 undefined, 
                 (error) => {
-                    console.error('Error loading Y_Bot.glb, using default box:', error);
-                    // في حال فشل التحميل، نستخدم لاعباً بسيطاً (مكعب)
+                    console.error('فشل تحميل Y_Bot.glb بالرابط المطلق، استخدام مكعب أزرق بديل:', error);
+                    // في حال فشل التحميل، نستخدم المكعب الأزرق البديل
                     const geometry = new THREE.BoxGeometry(1, 1, 1);
                     const material = new THREE.MeshPhongMaterial({ color: 0x0000ff });
                     player = new THREE.Mesh(geometry, material);
@@ -148,29 +145,25 @@
                 }
             );
 
-            // إنشاء العقبات (صخور/جدران)
-            const rockMaterial = new THREE.MeshPhongMaterial({ color: 0x708090 }); 
+            // ... (بقية كود العقبات وعصا التحكم والحركة كما هو) ...
             
+            // إنشاء العقبات 
+            const rockMaterial = new THREE.MeshPhongMaterial({ color: 0x708090 }); 
             for (let i = 0; i < NUM_OBSTACLES; i++) {
                 const sizeX = Math.random() * 5 + 2; 
                 const sizeY = Math.random() * 2 + 1; 
                 const sizeZ = Math.random() * 5 + 2; 
-
                 const rockGeometry = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
                 const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-
                 const x = (Math.random() - 0.5) * MAP_SIZE * 0.8;
                 const z = (Math.random() - 0.5) * MAP_SIZE * 0.8;
-                
                 rock.position.set(x, sizeY / 2 - 0.5, z);
                 rock.castShadow = true;
                 rock.receiveShadow = true;
-                
                 scene.add(rock);
                 obstacles.push(rock); 
             }
             
-            // ******************** إعدادات عصا التحكم (Joystick Setup) ********************
             const container = document.getElementById('joystick-container');
             const handle = document.getElementById('joystick-handle');
             
@@ -188,6 +181,10 @@
                 e.preventDefault();
                 joystick.active = true;
                 handleTouch(e.touches[0]);
+                if (player && action.run) {
+                    action.idle.stop();
+                    action.run.play();
+                }
             });
 
             document.addEventListener('touchmove', (e) => {
@@ -201,10 +198,9 @@
                 joystick.x = 0;
                 joystick.y = 0;
                 handle.style.transform = `translate(0px, 0px)`;
-                // إيقاف الرسوم المتحركة عند التوقف
-                if (player && player.userData.defaultAction) {
-                    // هنا يمكن التبديل إلى رسمة 'Idle' إذا كانت موجودة، أو نتركها على الوضع الافتراضي
-                    // player.userData.defaultAction.play(); // فقط للتوضيح، يمكن تعديلها لاحقاً
+                if (player && action.run && action.idle) {
+                    action.run.stop();
+                    action.idle.play();
                 }
             });
 
@@ -229,18 +225,16 @@
             animate(); 
         }
 
-        // دالة التحقق من التصادم 
+        // ... (بقية كود checkCollision و animate كما هو) ...
         function checkCollision(newX, newZ) {
             if (!player) return false; 
             const playerHalfSize = player.userData.playerHalfSize || 0.5; 
             const mapBoundary = MAP_SIZE / 2 - playerHalfSize;
             
-            // حدود الخريطة
             if (newX > mapBoundary || newX < -mapBoundary || newZ > mapBoundary || newZ < -mapBoundary) {
                 return true; 
             }
 
-            // التصادم مع العقبات
             for (const obstacle of obstacles) {
                 const wallHalfX = obstacle.geometry.parameters.width / 2;
                 const wallHalfZ = obstacle.geometry.parameters.depth / 2;
@@ -265,20 +259,17 @@
             return false;
         }
 
-        // الحلقة الرئيسية للعبة (Animation Loop)
         function animate() {
             requestAnimationFrame(animate); 
             
             const delta = clock.getDelta();
 
-            if (player) { // تأكد من تحميل اللاعب قبل تحريكه
+            if (player) { 
                 
-                // تحديث الرسوم المتحركة إذا كانت موجودة
                 if (mixer) {
                     mixer.update(delta);
                 }
                 
-                // 1. منطق حركة اللاعب 
                 if (joystick.active) {
                     let dirX = joystick.x / joystick.maxDistance;
                     let dirZ = joystick.y / joystick.maxDistance; 
@@ -286,40 +277,31 @@
                     let newX = player.position.x + dirX * playerSpeed;
                     let newZ = player.position.z + dirZ * playerSpeed; 
 
-                    // تحقق من التصادم على محور X
                     if (!checkCollision(newX, player.position.z)) {
                         player.position.x = newX;
                     }
                     
-                    // تحقق من التصادم على محور Z
                     if (!checkCollision(player.position.x, newZ)) {
                         player.position.z = newZ;
                     }
                     
-                    // دوران اللاعب (LookAt)
                     if (joystick.x !== 0 || joystick.y !== 0) {
                         const angle = Math.atan2(dirX, dirZ); 
                         player.rotation.y = angle; 
-                        
-                        // هنا يمكن تشغيل رسمة 'جري/Run' إذا كانت موجودة
                     }
                 }
 
-                // 2. تتبع الكاميرا (Third-Person Perspective)
                 camera.position.x = player.position.x;
                 camera.position.y = player.position.y + 1 + cameraHeight; 
                 camera.position.z = player.position.z + cameraDistance; 
                 camera.lookAt(player.position); 
             }
             
-            // 3. إعادة الرسم
             renderer.render(scene, camera);
         }
 
-        // بدء التشغيل
         init(); 
         
-        // تعديل حجم العرض عند تغيير حجم الشاشة
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
