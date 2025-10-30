@@ -1,313 +1,145 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>لعبة 3D - تحميل Y_Bot.glb عبر الرابط المطلق</title>
-    <style>
-        /* ستايل الشاشة والخلفية */
-        body { margin: 0; overflow: hidden; background-color: #7ec0ee; } 
-        canvas { display: block; }
+// === (1) التعريف التقليدي الآمن الذي يعمل على جهازك ===
+// هذا الكود يتجاوز مشكلة "No createScene export"
+var canvas = document.getElementById("renderCanvas");
+var engine = new BABYLON.Engine(canvas, true);
+
+var createScene = function () {
+    var scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color3(0.6, 0.8, 1.0); 
+
+    // ==================================================
+    // 1. فيزياء
+    var gravityVector = new BABYLON.Vector3(0, -9.81, 0);
+    var physicsPlugin = new BABYLON.CannonJSPlugin(); 
+    scene.enablePhysics(gravityVector, physicsPlugin);
+
+    // 2. ضوء وظل
+    var light = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-0.5, -1, -0.5), scene);
+    light.position = new BABYLON.Vector3(20, 40, 20);
+    light.intensity = 1.0;
+    var hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+    hemi.intensity = 0.3;
+    var shadowGen = new BABYLON.ShadowGenerator(1024, light);
+    shadowGen.useBlurExponentialShadowMap = true;
+    shadowGen.blurKernel = 8;
+
+    // 3. الأرضية
+    var ground = BABYLON.MeshBuilder.CreateGround("ground", {width:120, height:120}, scene);
+    var groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+    groundMat.diffuseColor = new BABYLON.Color3(0.3, 0.45, 0.2);
+    ground.material = groundMat;
+    ground.receiveShadows = true;
+    ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, restitution: 0.1, friction: 1 }, scene);
+    
+    // 4. اللاعب (كرة فيزيائية غير مرئية)
+    var playerSphere = BABYLON.MeshBuilder.CreateSphere("playerSphere", {diameter: 2, segments: 32}, scene);
+    playerSphere.position = new BABYLON.Vector3(0, 6, 0);
+    playerSphere.visibility = 0;
+    playerSphere.physicsImpostor = new BABYLON.PhysicsImpostor(playerSphere, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 2, restitution: 0.0, friction: 0.5 }, scene);
+
+    // 5. تحميل الشخصية 3D الحقيقية (الروبوت)
+    var playerModel; 
+    
+    BABYLON.SceneLoader.ImportMesh(
+        "", 
+        "https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/Dude/Dude.glb", 
+        "", 
+        scene, 
+        function (newMeshes) {
+            playerModel = newMeshes[0]; 
+            playerModel.scaling.scaleInPlace(0.3); 
+            playerModel.position.y = 0; 
+            shadowGen.addShadowCaster(playerModel); 
+            playerModel.parent = playerSphere;
+        }
+    );
+
+    // 6. كاميرا التتبع
+    var camera = new BABYLON.FollowCamera("followCam", new BABYLON.Vector3(0, 10, -20), scene);
+    camera.lockedTarget = playerSphere; 
+    camera.radius = 12;            
+    camera.heightOffset = 6;       
+    camera.rotationOffset = 0;     
+    camera.cameraAcceleration = 0.1;
+    camera.maxCameraSpeed = 20;
+    camera.attachControl(canvas, true);
+
+    // 7. عصا التحكم باللمس وواجهة المستخدم
+    var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+    var scoreText = new BABYLON.GUI.TextBlock();
+    scoreText.text = "Score: 0";
+    scoreText.color = "white";
+    scoreText.fontSize = 24;
+    scoreText.top = "10px";
+    scoreText.left = "10px";
+    scoreText.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+    scoreText.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+    advancedTexture.addControl(scoreText);
+
+    var leftJoystick = new BABYLON.VirtualJoystick(true); 
+    leftJoystick.setJoystickSensibility(0.15); 
+
+    // 8. تحكم وحركة (يتم تنفيذه في حلقة العرض)
+    var moveForce = 12; 
+    var jumpForce = 6;  
+    var canJump = false;
+    var lastJumpTime = 0;
+
+    scene.onBeforeRenderObservable.add(function () {
+        var dt = engine.getDeltaTime() / 1000;
+        var joyX = leftJoystick.deltaPosition.x / 100;
+        var joyY = leftJoystick.deltaPosition.y / 100;
+
+        var moveVector = new BABYLON.Vector3(joyX, 0, joyY);
         
-        /* تصميم عصا التحكم (Joystick) */
-        #joystick-container {
-            position: fixed;
-            bottom: 20px; left: 50%; transform: translateX(-50%);
-            width: 150px; height: 150px; z-index: 1000;
-            background-color: rgba(0, 0, 0, 0.5); border-radius: 50%;
-            display: flex; justify-content: center; align-items: center;
-            touch-action: none; 
-        }
-        #joystick-handle {
-            width: 50px; height: 50px; background-color: rgba(255, 255, 255, 0.8);
-            border-radius: 50%; pointer-events: none; 
-        }
-    </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-</head>
-<body>
-    <div id="joystick-container">
-        <div id="joystick-handle"></div>
-    </div>
+        if (moveVector.length() > 0.001) {
+            // كود تحويل الاتجاه حسب الكاميرا وتطبيق القوة (Impulse)
+            var camForward = camera.getForwardRay().direction;
+            var camRight = BABYLON.Vector3.Cross(camForward, BABYLON.Vector3.Up()).normalize();
+            var forward = new BABYLON.Vector3(camForward.x, 0, camForward.z).normalize();
+            var right = new BABYLON.Vector3(camRight.x, 0, camRight.z).normalize();
 
-    <script>
-        // ******************** متغير المسار الأساسي (غيّري هذا المسار ليتناسب مع مستودعك) ********************
-        // يجب أن يكون هذا الرابط هو رابط GitHub Pages الخاص بكِ
-        const BASE_PATH = 'https://bxzzccpm.github.io/-title-title-/';
+            var dir = forward.scale(moveVector.z).add(right.scale(moveVector.x));
+            if (dir.length() > 0.001) {
+                dir = dir.normalize().scale(moveForce);
+                playerSphere.physicsImpostor.applyImpulse(dir.scale(dt), playerSphere.getAbsolutePosition());
+            }
+        }
         
-        // ******************** المتغيرات العالمية ********************
-        let scene, camera, renderer, player, mixer; 
-        let obstacles = []; 
-        const MAP_SIZE = 100; 
-        const NUM_OBSTACLES = 10; 
-        let joystick = { active: false, x: 0, y: 0, maxDistance: 75 };
-        const playerSpeed = 0.05; 
-        const cameraHeight = 2.0; 
-        const cameraDistance = 4; 
-        let clock = new THREE.Clock(); 
-        let action = {};
-        
-        // ******************** دالة التهيئة ********************
-        function init() {
-            // ... (بقية كود التهيئة والإضاءة كما هو) ...
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x7ec0ee); 
-            
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
-            document.body.appendChild(renderer.domElement);
-            
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
-            scene.add(ambientLight);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); 
-            directionalLight.position.set(10, 20, 10); 
-            directionalLight.castShadow = true;
-            directionalLight.shadow.mapSize.width = 1024; 
-            directionalLight.shadow.mapSize.height = 1024; 
-            scene.add(directionalLight);
-
-            // ******************** 1. الأرضية (تحميل خامة العشب بالرابط المطلق) ********************
-            const textureLoader = new THREE.TextureLoader();
-            
-            textureLoader.load(
-                BASE_PATH + 'grass_texture.jpg', // استخدام المسار المطلق
-                (texture) => {
-                    texture.wrapS = THREE.RepeatWrapping;
-                    texture.wrapT = THREE.RepeatWrapping;
-                    texture.repeat.set(MAP_SIZE / 5, MAP_SIZE / 5); 
-
-                    const groundGeometry = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE); 
-                    const groundMaterial = new THREE.MeshPhongMaterial({ map: texture, side: THREE.DoubleSide }); 
-                    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-                    
-                    ground.rotation.x = Math.PI / 2;
-                    ground.position.y = -0.5;
-                    ground.receiveShadow = true; 
-                    scene.add(ground);
-                },
-                undefined,
-                (error) => {
-                    console.error('فشل تحميل خامة العشب بالرابط المطلق، استخدام لون افتراضي:', error);
-                    // في حال فشل التحميل، نستخدم اللون الأخضر البسيط
-                    const groundGeometry = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE);
-                    const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x4B8E00, side: THREE.DoubleSide });
-                    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-                    ground.rotation.x = Math.PI / 2;
-                    ground.position.y = -0.5;
-                    ground.receiveShadow = true;
-                    scene.add(ground);
-                }
-            );
-
-            // ******************** 2. تحميل اللاعب (Y_Bot.glb بالرابط المطلق) ********************
-            const loader = new THREE.GLTFLoader();
-            
-            loader.load(
-                BASE_PATH + 'Y_Bot.glb', // استخدام المسار المطلق
-                (gltf) => {
-                    player = gltf.scene; 
-                    player.position.y = 0; 
-                    player.scale.set(1.5, 1.5, 1.5); 
-                    
-                    player.traverse((child) => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                        }
-                    });
-
-                    scene.add(player); 
-                    player.userData.playerHalfSize = 0.5; 
-                    
-                    // إعداد الرسوم المتحركة
-                    mixer = new THREE.AnimationMixer(player);
-                    gltf.animations.forEach((clip) => {
-                        if (clip.name === 'Armature|mixamo.com|Layer0') {
-                            action.idle = mixer.clipAction(clip);
-                            action.run = mixer.clipAction(clip);
-                            action.idle.play();
-                        }
-                    });
-                }, 
-                undefined, 
-                (error) => {
-                    console.error('فشل تحميل Y_Bot.glb بالرابط المطلق، استخدام مكعب أزرق بديل:', error);
-                    // في حال فشل التحميل، نستخدم المكعب الأزرق البديل
-                    const geometry = new THREE.BoxGeometry(1, 1, 1);
-                    const material = new THREE.MeshPhongMaterial({ color: 0x0000ff });
-                    player = new THREE.Mesh(geometry, material);
-                    player.position.y = 0.5;
-                    player.castShadow = true;
-                    scene.add(player);
-                    player.userData.playerHalfSize = 0.5; 
-                }
-            );
-
-            // ... (بقية كود العقبات وعصا التحكم والحركة كما هو) ...
-            
-            // إنشاء العقبات 
-            const rockMaterial = new THREE.MeshPhongMaterial({ color: 0x708090 }); 
-            for (let i = 0; i < NUM_OBSTACLES; i++) {
-                const sizeX = Math.random() * 5 + 2; 
-                const sizeY = Math.random() * 2 + 1; 
-                const sizeZ = Math.random() * 5 + 2; 
-                const rockGeometry = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
-                const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-                const x = (Math.random() - 0.5) * MAP_SIZE * 0.8;
-                const z = (Math.random() - 0.5) * MAP_SIZE * 0.8;
-                rock.position.set(x, sizeY / 2 - 0.5, z);
-                rock.castShadow = true;
-                rock.receiveShadow = true;
-                scene.add(rock);
-                obstacles.push(rock); 
-            }
-            
-            const container = document.getElementById('joystick-container');
-            const handle = document.getElementById('joystick-handle');
-            
-            let initialX, initialY;
-            
-            function updateInitialPosition() {
-                const rect = container.getBoundingClientRect();
-                initialX = rect.left + rect.width / 2;
-                initialY = rect.top + rect.height / 2;
-            }
-            updateInitialPosition();
-            window.addEventListener('resize', updateInitialPosition);
-
-            container.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                joystick.active = true;
-                handleTouch(e.touches[0]);
-                if (player && action.run) {
-                    action.idle.stop();
-                    action.run.play();
-                }
-            });
-
-            document.addEventListener('touchmove', (e) => {
-                if (joystick.active) {
-                    handleTouch(e.touches[0]);
-                }
-            });
-
-            document.addEventListener('touchend', () => {
-                joystick.active = false;
-                joystick.x = 0;
-                joystick.y = 0;
-                handle.style.transform = `translate(0px, 0px)`;
-                if (player && action.run && action.idle) {
-                    action.run.stop();
-                    action.idle.play();
-                }
-            });
-
-            function handleTouch(touch) {
-                const deltaX = touch.clientX - initialX;
-                const deltaY = touch.clientY - initialY;
-
-                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-                const angle = Math.atan2(deltaX, -deltaY); 
-
-                if (distance > joystick.maxDistance) {
-                    joystick.x = Math.sin(angle) * joystick.maxDistance;
-                    joystick.y = -Math.cos(angle) * joystick.maxDistance; 
-                } else {
-                    joystick.x = deltaX;
-                    joystick.y = deltaY;
-                }
-
-                handle.style.transform = `translate(${joystick.x}px, ${joystick.y}px)`;
-            }
-            
-            animate(); 
+        // دوران النموذج
+        if (playerModel && moveVector.length() > 0.001) {
+            var targetRotation = Math.atan2(dir.x, dir.z);
+            playerModel.rotation.y = targetRotation;
         }
 
-        // ... (بقية كود checkCollision و animate كما هو) ...
-        function checkCollision(newX, newZ) {
-            if (!player) return false; 
-            const playerHalfSize = player.userData.playerHalfSize || 0.5; 
-            const mapBoundary = MAP_SIZE / 2 - playerHalfSize;
-            
-            if (newX > mapBoundary || newX < -mapBoundary || newZ > mapBoundary || newZ < -mapBoundary) {
-                return true; 
-            }
-
-            for (const obstacle of obstacles) {
-                const wallHalfX = obstacle.geometry.parameters.width / 2;
-                const wallHalfZ = obstacle.geometry.parameters.depth / 2;
-                
-                const playerMinX = newX - playerHalfSize;
-                const playerMaxX = newX + playerHalfSize;
-                const playerMinZ = newZ - playerHalfSize;
-                const playerMaxZ = newZ + playerHalfSize;
-                
-                const wallMinX = obstacle.position.x - wallHalfX;
-                const wallMaxX = obstacle.position.x + wallHalfX;
-                const wallMinZ = obstacle.position.z - wallHalfZ;
-                const wallMaxZ = obstacle.position.z + wallHalfZ;
-                
-                const collisionX = playerMaxX > wallMinX && playerMinX < wallMaxX;
-                const collisionZ = playerMaxZ > wallMinZ && playerMinZ < wallMaxZ;
-
-                if (collisionX && collisionZ) {
-                    return true;
-                }
-            }
-            return false;
+        // قفز
+        var now = Date.now();
+        if ((Math.abs(joyY) > 0.6) && canJump && (now - lastJumpTime) > 350) { 
+            var up = new BABYLON.Vector3(0, jumpForce, 0);
+            playerSphere.physicsImpostor.applyImpulse(up, playerSphere.getAbsolutePosition());
+            lastJumpTime = now;
         }
+    });
 
-        function animate() {
-            requestAnimationFrame(animate); 
-            
-            const delta = clock.getDelta();
+    // كود فحص القفز
+    scene.registerAfterRender(function () {
+        var pos = playerSphere.position;
+        var ray = new BABYLON.Ray(pos, new BABYLON.Vector3(0, -1, 0), 1.1);
+        var pick = scene.pickWithRay(ray, function(mesh) { return mesh === ground; });
+        canJump = (pick && pick.hit);
+    });
 
-            if (player) { 
-                
-                if (mixer) {
-                    mixer.update(delta);
-                }
-                
-                if (joystick.active) {
-                    let dirX = joystick.x / joystick.maxDistance;
-                    let dirZ = joystick.y / joystick.maxDistance; 
-                    
-                    let newX = player.position.x + dirX * playerSpeed;
-                    let newZ = player.position.z + dirZ * playerSpeed; 
+    return scene;
+};
 
-                    if (!checkCollision(newX, player.position.z)) {
-                        player.position.x = newX;
-                    }
-                    
-                    if (!checkCollision(player.position.x, newZ)) {
-                        player.position.z = newZ;
-                    }
-                    
-                    if (joystick.x !== 0 || joystick.y !== 0) {
-                        const angle = Math.atan2(dirX, dirZ); 
-                        player.rotation.y = angle; 
-                    }
-                }
+// === (2) تشغيل الحلقة الرئيسية للمحرك ===
+// هذا الجزء ضروري جداً لتشغيل اللعبة في النمط التقليدي
+var scene = createScene();
 
-                camera.position.x = player.position.x;
-                camera.position.y = player.position.y + 1 + cameraHeight; 
-                camera.position.z = player.position.z + cameraDistance; 
-                camera.lookAt(player.position); 
-            }
-            
-            renderer.render(scene, camera);
-        }
+engine.runRenderLoop(function () {
+    if (scene) scene.render();
+});
 
-        init(); 
-        
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-
-    </script>
-</body>
-</html>
+window.addEventListener("resize", function () {
+    engine.resize();
+});
